@@ -1,0 +1,219 @@
+/*
+
+The MIT License (MIT)
+
+Copyright (c) 2017-2022 Tim Warburton, Noel Chalmers, Jesse Chan, Ali Karakus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+
+#define BLOCK_SIZE 256
+
+@kernel void fillKernel(const int N,
+                        @restrict dfloat *x){
+
+  for (int n = 0; n < N; ++n; @tile(BLOCK_SIZE, @outer(0), @inner(0))) {
+    dfloat arg  = 1.e9*(n*n);
+    arg  = 1.e9*cos(arg);
+    x[n] = sin(arg);
+  }
+}
+
+@kernel void fmaRate(const int N,
+                     const int K,
+                     @restrict const dfloat *x,
+                     @restrict       dfloat *y){
+
+  for (int n = 0; n < N; ++n; @tile(BLOCK_SIZE, @outer(0), @inner(0))) {
+    dfloat r_x = x[n];
+
+    dfloat r_y = dfloat(0.0);
+    for (int k=0;k<K;++k) {
+      r_y += dfloat(0.5)*r_x;
+    }
+
+    y[n] = r_y;
+  }
+}
+
+@kernel void shmem1Rate(const int N,
+                        const int K,
+                        @restrict const dfloat *x,
+                        @restrict       dfloat *y){
+
+
+  for (int n_o = 0; n_o < N; n_o+=BLOCK_SIZE; @outer(0)) {
+    @shared dfloat s_x[BLOCK_SIZE];
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      const int n = n_o + n_i;
+      s_x[n_i] = (n < N) ? x[n] : dfloat(0.0);
+    }
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      dfloat r_y = dfloat(0.0);
+      for (int k=0;k<K;++k) {
+        r_y += dfloat(0.5)*s_x[(n_i + 32*k)%BLOCK_SIZE];
+      }
+
+      const int n = n_o + n_i;
+      if (n < N) {
+        y[n] = r_y;
+      }
+    }
+  }
+}
+
+@kernel void shmem2Rate(const int N,
+                        const int K,
+                        @restrict const dfloat *x,
+                        @restrict       dfloat *y){
+
+
+  for (int n_o = 0; n_o < N; n_o+=BLOCK_SIZE; @outer(0)) {
+    @shared dfloat s_x[BLOCK_SIZE];
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      const int n = n_o + n_i;
+      s_x[n_i] = (n < N) ? x[n] : dfloat(0.0);
+    }
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      dfloat r_y = dfloat(0.0);
+      for (int k=0;k<K;++k) {
+        r_y += s_x[(n_i + 32*k)%BLOCK_SIZE]*s_x[(n_i + 64*k)%BLOCK_SIZE];
+      }
+
+      const int n = n_o + n_i;
+      if (n < N) {
+        y[n] = r_y;
+      }
+    }
+  }
+}
+
+
+
+@kernel void mfmaRate(const int N,
+                      const int K,
+                      @restrict const dfloat *x,
+                      @restrict       dfloat *y){
+
+  for (int n = 0; n < N; ++n; @tile(BLOCK_SIZE, @outer(0), @inner(0))) {
+
+    dfloat r_x = x[n];
+
+#if HAS_FP64_MFMA
+      __attribute__((__vector_size__(4 * 8))) dfloat r_y = {0.0};
+#elif HAS_FP32_MFMA
+      __attribute__((__vector_size__(4 * 4))) dfloat r_y = {0.0};
+#else
+      dfloat r_y[4] = {0.};
+#endif
+
+    for (int k=0;k<K;++k) {
+#if HAS_FP64_MFMA
+      __builtin_amdgcn_mfma_f64_16x16x4f64(dfloat(0.5), r_x, r_y, 0, 0, 0);
+#elif HAS_FP32_MFMA
+      __builtin_amdgcn_mfma_f32_16x16x4f32(dfloat(0.5), r_x, r_y, 0, 0, 0);
+#endif
+    }
+
+    y[n] = r_y[0];
+  }
+}
+
+@kernel void shmem1mfmaRate(const int N,
+                            const int K,
+                            @restrict const dfloat *x,
+                            @restrict       dfloat *y){
+
+
+  for (int n_o = 0; n_o < N; n_o+=BLOCK_SIZE; @outer(0)) {
+    @shared dfloat s_x[BLOCK_SIZE];
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      const int n = n_o + n_i;
+      s_x[n_i] = (n < N) ? x[n] : dfloat(0.0);
+    }
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+#if HAS_FP64_MFMA
+      __attribute__((__vector_size__(4 * 8))) dfloat r_y = {0.0};
+#elif HAS_FP32_MFMA
+      __attribute__((__vector_size__(4 * 4))) dfloat r_y = {0.0};
+#else
+      dfloat r_y[4] = {0.};
+#endif
+
+      for (int k=0;k<K;++k) {
+#if HAS_FP64_MFMA
+        __builtin_amdgcn_mfma_f64_16x16x4f64(dfloat(0.5), s_x[(n_i + 32*k)%BLOCK_SIZE], r_y, 0, 0, 0);
+#elif HAS_FP32_MFMA
+        __builtin_amdgcn_mfma_f32_16x16x4f32(dfloat(0.5), s_x[(n_i + 32*k)%BLOCK_SIZE], r_y, 0, 0, 0);
+#endif
+      }
+
+      const int n = n_o + n_i;
+      if (n < N) {
+        y[n] = r_y[0];
+      }
+    }
+  }
+}
+
+@kernel void shmem2mfmaRate(const int N,
+                            const int K,
+                            @restrict const dfloat *x,
+                            @restrict       dfloat *y){
+
+
+  for (int n_o = 0; n_o < N; n_o+=BLOCK_SIZE; @outer(0)) {
+    @shared dfloat s_x[BLOCK_SIZE];
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+      const int n = n_o + n_i;
+      s_x[n_i] = (n < N) ? x[n] : dfloat(0.0);
+    }
+
+    for (int n_i = 0; n_i < BLOCK_SIZE; ++n_i; @inner(0)) {
+#if HAS_FP64_MFMA
+      __attribute__((__vector_size__(4 * 8))) dfloat r_y = {0.0};
+#elif HAS_FP32_MFMA
+      __attribute__((__vector_size__(4 * 4))) dfloat r_y = {0.0};
+#else
+      dfloat r_y[4] = {0.};
+#endif
+
+      for (int k=0;k<K;++k) {
+#if HAS_FP64_MFMA
+        __builtin_amdgcn_mfma_f64_16x16x4f64(s_x[(n_i + 32*k)%BLOCK_SIZE], s_x[(n_i + 64*k)%BLOCK_SIZE], r_y, 0, 0, 0);
+#elif HAS_FP32_MFMA
+        __builtin_amdgcn_mfma_f32_16x16x4f32(s_x[(n_i + 32*k)%BLOCK_SIZE], s_x[(n_i + 64*k)%BLOCK_SIZE], r_y, 0, 0, 0);
+#endif
+      }
+
+      const int n = n_o + n_i;
+      if (n < N) {
+        y[n] = r_y[0];
+      }
+    }
+  }
+}
