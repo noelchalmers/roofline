@@ -149,21 +149,39 @@ void run(occa::json &args) {
                                     props
                                    );
 
-  occa::kernel mfmaKernel  = device.buildKernel(
+  occa::kernel mfma4Kernel  = device.buildKernel(
                                     kernelFileName,
-                                    "mfmaRate",
+                                    "mfma4Rate",
                                     props
                                    );
 
-  occa::kernel shmem1mfmaKernel  = device.buildKernel(
+  occa::kernel shmem1mfma4Kernel  = device.buildKernel(
                                     kernelFileName,
-                                    "shmem1mfmaRate",
+                                    "shmem1mfma4Rate",
                                     props
                                    );
 
-  occa::kernel shmem2mfmaKernel  = device.buildKernel(
+  occa::kernel shmem2mfma4Kernel  = device.buildKernel(
                                     kernelFileName,
-                                    "shmem2mfmaRate",
+                                    "shmem2mfma4Rate",
+                                    props
+                                   );
+
+  occa::kernel mfma16Kernel  = device.buildKernel(
+                                    kernelFileName,
+                                    "mfma16Rate",
+                                    props
+                                   );
+
+  occa::kernel shmem1mfma16Kernel  = device.buildKernel(
+                                    kernelFileName,
+                                    "shmem1mfma16Rate",
+                                    props
+                                   );
+
+  occa::kernel shmem2mfma16Kernel  = device.buildKernel(
+                                    kernelFileName,
+                                    "shmem2mfma16Rate",
                                     props
                                    );
 
@@ -173,23 +191,24 @@ void run(occa::json &args) {
   occa::memory o_x = device.malloc<T>(N);
   occa::memory o_y = device.malloc<T>(N);
 
+  T a = 0.5;
 
   {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      fmaKernel(N, 8, o_x, o_y);
+      fmaKernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
     //test
-    for(int k=1;k<=1024;k*=2){
+    for(int k=1;k<=4096;k*=2){
 
       timePoint_t start = std::chrono::high_resolution_clock::now();;
 
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        fmaKernel(N, k, o_x, o_y);
+        fmaKernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -202,7 +221,7 @@ void run(occa::json &args) {
 
       size_t flops = 2*k*static_cast<size_t>(N);
 
-      printf("FMA: BW=%6.2f GB/s, AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
+      printf("FMA:        BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f\n",
               (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime);
     }
   }
@@ -210,18 +229,18 @@ void run(occa::json &args) {
   {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      shmem1Kernel(N, 8, o_x, o_y);
+      shmem1Kernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
     //test
-    for(int k=1;k<=1024;k*=2){
+    for(int k=1;k<=4096;k*=2){
       timePoint_t start = std::chrono::high_resolution_clock::now();;
 
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        shmem1Kernel(N, k, o_x, o_y);
+        shmem1Kernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -234,26 +253,26 @@ void run(occa::json &args) {
 
       size_t flops = 2*k*static_cast<size_t>(N);
 
-      printf("SHMEM1: BW=%6.2f GB/s, AI=%6.2f FLOP/B, SHMEM AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
-              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, static_cast<double>(2*k)/sizeof(T), (static_cast<double>(flops)/1.e9)/elapsedTime);
+      printf("FMA SHMEM1: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(2)/sizeof(T));
     }
   }
 
   {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      shmem2Kernel(N, 8, o_x, o_y);
+      shmem2Kernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
     //test
-    for(int k=1;k<=1024;k*=2){
+    for(int k=1;k<=4096;k*=2){
       timePoint_t start = std::chrono::high_resolution_clock::now();;
 
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        shmem2Kernel(N, k, o_x, o_y);
+        shmem2Kernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -266,15 +285,15 @@ void run(occa::json &args) {
 
       size_t flops = 2*k*static_cast<size_t>(N);
 
-      printf("SHMEM2: BW=%6.2f GB/s, AI=%6.2f FLOP/B, SHMEM AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
-              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, static_cast<double>(2*k)/(2*sizeof(T)), (static_cast<double>(flops)/1.e9)/elapsedTime);
+      printf("FMA SHMEM2: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(2)/(2*sizeof(T)));
     }
   }
 
   if (hasMFMAs) {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      mfmaKernel(N, 8, o_x, o_y);
+      mfma4Kernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
@@ -286,7 +305,104 @@ void run(occa::json &args) {
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        mfmaKernel(N, k, o_x, o_y);
+        mfma4Kernel(N, k, a, o_x, o_y);
+      }
+
+      device.finish();
+      timePoint_t end = std::chrono::high_resolution_clock::now();;
+      double elapsedTime = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count()/(1.0e6)/Ntests;
+
+      size_t bytesIn  = N*sizeof(T);
+      size_t bytesOut = N*sizeof(T);
+      size_t bytes = bytesIn + bytesOut;
+
+      size_t flops = (512/64)*k*static_cast<size_t>(N);
+
+      printf("MFMA4:        BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(512)/(64*sizeof(T)));
+    }
+  }
+
+  if (hasMFMAs) {
+    int Nwarm = 5;
+    for(int n=0;n<Nwarm;++n){ //warmup
+      shmem1mfma4Kernel(N, 8, a, o_x, o_y);
+    }
+    device.finish();
+
+    //test
+    for(int k=1;k<=1024;k*=2){
+      timePoint_t start = std::chrono::high_resolution_clock::now();;
+
+      /* COPY Test */
+      int Ntests = 20;
+      for(int n=0;n<Ntests;++n){
+        shmem1mfma4Kernel(N, k, a, o_x, o_y);
+      }
+
+      device.finish();
+      timePoint_t end = std::chrono::high_resolution_clock::now();;
+      double elapsedTime = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count()/(1.0e6)/Ntests;
+
+      size_t bytesIn  = N*sizeof(T);
+      size_t bytesOut = N*sizeof(T);
+      size_t bytes = bytesIn + bytesOut;
+
+      size_t flops = (512/64)*k*static_cast<size_t>(N);
+
+      printf("MFMA4 SHMEM1: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(512)/(64*sizeof(T)));
+    }
+  }
+
+  if (hasMFMAs) {
+    int Nwarm = 5;
+    for(int n=0;n<Nwarm;++n){ //warmup
+      shmem2mfma4Kernel(N, 8, a, o_x, o_y);
+    }
+    device.finish();
+
+    //test
+    for(int k=1;k<=1024;k*=2){
+      timePoint_t start = std::chrono::high_resolution_clock::now();;
+
+      /* COPY Test */
+      int Ntests = 20;
+      for(int n=0;n<Ntests;++n){
+        shmem2mfma4Kernel(N, k, a, o_x, o_y);
+      }
+
+      device.finish();
+      timePoint_t end = std::chrono::high_resolution_clock::now();;
+      double elapsedTime = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count()/(1.0e6)/Ntests;
+
+      size_t bytesIn  = N*sizeof(T);
+      size_t bytesOut = N*sizeof(T);
+      size_t bytes = bytesIn + bytesOut;
+
+      size_t flops = (512/64)*k*static_cast<size_t>(N);
+
+      printf("MFMA4 SHMEM2: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(512)/(2*64*sizeof(T)));
+    }
+  }
+
+  if (hasMFMAs) {
+    int Nwarm = 5;
+    for(int n=0;n<Nwarm;++n){ //warmup
+      mfma16Kernel(N, 8, a, o_x, o_y);
+    }
+    device.finish();
+
+    //test
+    for(int k=1;k<=256;k*=2){
+
+      timePoint_t start = std::chrono::high_resolution_clock::now();;
+
+      /* COPY Test */
+      int Ntests = 20;
+      for(int n=0;n<Ntests;++n){
+        mfma16Kernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -299,7 +415,7 @@ void run(occa::json &args) {
 
       size_t flops = (2048/64)*k*static_cast<size_t>(N);
 
-      printf("MFMA: BW=%6.2f GB/s, AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
+      printf("MFMA16:        BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f\n",
               (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime);
     }
   }
@@ -307,18 +423,18 @@ void run(occa::json &args) {
   if (hasMFMAs) {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      shmem1mfmaKernel(N, 8, o_x, o_y);
+      shmem1mfma16Kernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
     //test
-    for(int k=1;k<=1024;k*=2){
+    for(int k=1;k<=256;k*=2){
       timePoint_t start = std::chrono::high_resolution_clock::now();;
 
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        shmem1mfmaKernel(N, k, o_x, o_y);
+        shmem1mfma16Kernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -331,26 +447,26 @@ void run(occa::json &args) {
 
       size_t flops = (2048/64)*k*static_cast<size_t>(N);
 
-      printf("MFMA SHMEM1: BW=%6.2f GB/s, AI=%6.2f FLOP/B, SHMEM AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
-              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, static_cast<double>((2048/64)*k)/sizeof(T), (static_cast<double>(flops)/1.e9)/elapsedTime);
+      printf("MFMA16 SHMEM1: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(2048)/(64*sizeof(T)));
     }
   }
 
   if (hasMFMAs) {
     int Nwarm = 5;
     for(int n=0;n<Nwarm;++n){ //warmup
-      shmem2mfmaKernel(N, 8, o_x, o_y);
+      shmem2mfma16Kernel(N, 8, a, o_x, o_y);
     }
     device.finish();
 
     //test
-    for(int k=1;k<=1024;k*=2){
+    for(int k=1;k<=256;k*=2){
       timePoint_t start = std::chrono::high_resolution_clock::now();;
 
       /* COPY Test */
       int Ntests = 20;
       for(int n=0;n<Ntests;++n){
-        shmem2mfmaKernel(N, k, o_x, o_y);
+        shmem2mfma16Kernel(N, k, a, o_x, o_y);
       }
 
       device.finish();
@@ -363,8 +479,8 @@ void run(occa::json &args) {
 
       size_t flops = (2048/64)*k*static_cast<size_t>(N);
 
-      printf("MFMA SHMEM2: BW=%6.2f GB/s, AI=%6.2f FLOP/B, SHMEM AI=%6.2f FLOP/B, GFLOPS=%6.2f\n",
-              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, static_cast<double>((2048/64)*k)/(2*sizeof(T)), (static_cast<double>(flops)/1.e9)/elapsedTime);
+      printf("MFMA16 SHMEM2: BW=%8.2f GB/s, AI=%8.2f FLOP/B, GFLOPS=%8.2f, SHMEM AI=%8.2f FLOP/B\n",
+              (static_cast<double>(bytes)/1.e9)/elapsedTime, static_cast<double>(flops)/bytes, (static_cast<double>(flops)/1.e9)/elapsedTime, static_cast<double>(2048)/(2*64*sizeof(T)));
     }
   }
 }
