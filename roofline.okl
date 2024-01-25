@@ -39,7 +39,7 @@ SOFTWARE.
 
     #pragma unroll
     for (int k=0;k<K;++k) {
-      r_y += a*r_x;
+      r_y += r_y*r_x;
     }
 
     y[n] = r_y;
